@@ -3,6 +3,22 @@ import requests
 from datetime import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+import os, json
+
+FAVORITES_FILE = "favorites.json"
+
+def _load_favorites():
+    if not os.path.exists(FAVORITES_FILE):
+        return []
+    try:
+        with open(FAVORITES_FILE, "r") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+def _save_favorites(items):
+    with open(FAVORITES_FILE, "w") as f:
+        json.dump(items, f, ensure_ascii=False, indent=2)
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "http://localhost:3000"}}, supports_credentials=True)
@@ -67,24 +83,34 @@ def get_movie_recommendations(mood = "happy", runtime = 90, max_results=5):
     return [
     {
         "title": movie.get("title"),
-        "overview": movie.get("overview")
+        "overview": movie.get("overview"),
+        "poster_path": movie.get("poster_path")
     }
     for movie in results if movie.get("title") and movie.get("overview")
     ]
 
 @app.route("/save_favorite", methods=["POST"])
 def save_favorite():
-    data = request.get_json()
+    data = request.get_json() or {}
     title = data.get("title")
     overview = data.get("overview")
-    mood = data.get("mood")  # optional, if you want to track it
+    mood = data.get("mood")
+    poster_path = data.get("poster_path")
 
-    today = datetime.now().strftime("%Y-%m-%d")
-    with open("favorites.txt", "a") as file:
-        file.write(f"{title} ({today}, Mood: {mood})\n")
-        file.write(f"{overview}\n\n")
-    
+    if not title or not overview:
+        return {"message": "Missing title or overview."}, 400
+
+    items = _load_favorites()
+    items.append({
+        "title": title,
+        "overview": overview,
+        "mood": mood,
+        "poster_path": poster_path,
+        "date": datetime.now().strftime("%Y-%m-%d"),
+    })
+    _save_favorites(items)
     return {"message": "Favorite saved successfully!"}, 200
+
 
 @app.route("/recommend", methods=["POST"])
 def get_movie_recommendations_api():
@@ -96,14 +122,17 @@ def get_movie_recommendations_api():
     print("Sending these recommendations:", recommendations)
     return jsonify({"movies": recommendations})
 
+#creates favorites file (seperate tab)
 @app.route("/favorites", methods=["GET"])
 def get_favorites():
-    try:
-        with open("favorites.txt", "r") as file:
-            content = file.read()
-        return jsonify({"favorites": content}), 200
-    except FileNotFoundError:
-        return jsonify({"favorites": ""}), 200
+    return jsonify(_load_favorites()), 200
+    
+#opens favorite file in write mode and clears content
+@app.route("/clear_favorites", methods=["POST"])
+def clear_favorites():
+    _save_favorites([])
+    return jsonify({"message": "Favorites cleared!"}), 200
+
     
 #default error handling
 @app.errorhandler(Exception)
