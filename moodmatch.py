@@ -29,6 +29,20 @@ API_KEY = '22ed80d327e416f838ff144080cae633'
 #root of every request made (GET, PULL, PUT) add endpoints to it later
 TMDB_API_URL = 'https://api.themoviedb.org/3'
 
+#defines a function to search where each movie can be watched
+def get_watch_providers(movie_id):
+    """Get streaming providers for a movie"""
+    url = f"{TMDB_API_URL}/movie/{movie_id}/watch/providers"
+    params = {"api_key": API_KEY}
+    response = requests.get(url, params=params)
+    data = response.json()
+    us_providers=data.get("results", {}).get("US", {})
+    return{
+        "flatrate": us_providers.get("flatrate", []),
+        "rent": us_providers.get("rent", []),
+        "buy": us_providers.get("buy", [])
+    }
+
 #defines a function to search for movie recs based on inputted mood
 #when building the actual app we make out own API to do HTTP requests into this
 def get_movie_recommendations(mood = "happy", runtime = 90, max_results=5):
@@ -82,9 +96,11 @@ def get_movie_recommendations(mood = "happy", runtime = 90, max_results=5):
     #Returns cleaned-up list for user
     return [
     {
+        "id": movie.get("id"),
         "title": movie.get("title"),
         "overview": movie.get("overview"),
-        "poster_path": movie.get("poster_path")
+        "poster_path": movie.get("poster_path"),
+        "watch_providers": get_watch_providers(movie.get("id"))
     }
     for movie in results if movie.get("title") and movie.get("overview")
     ]
@@ -92,6 +108,7 @@ def get_movie_recommendations(mood = "happy", runtime = 90, max_results=5):
 @app.route("/save_favorite", methods=["POST"])
 def save_favorite():
     data = request.get_json() or {}
+    movie_id = data.get("id")
     title = data.get("title")
     overview = data.get("overview")
     mood = data.get("mood")
@@ -101,10 +118,25 @@ def save_favorite():
         return {"message": "Missing title or overview."}, 400
 
     items = _load_favorites()
+
+    #Duplicate Check
+    if movie_id is not None:
+        if any(str(it.get("id")) == str(movie_id) for it in items) :
+            return {"message": "Already in favorites."}, 409
+        
+    else:
+        if any(
+            (it.get("title") or "").strip().lower() == title.strip().lower()
+            for it in items
+        ):
+            return {"message": "Already in favorites"}, 409
+        
+
     items.append({
         "title": title,
         "overview": overview,
         "mood": mood,
+        "id": movie_id,
         "poster_path": poster_path,
         "date": datetime.now().strftime("%Y-%m-%d"),
     })
