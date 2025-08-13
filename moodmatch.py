@@ -3,7 +3,7 @@ import requests
 from datetime import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import os, json
+import os, json, random
 
 FAVORITES_FILE = "favorites.json"
 
@@ -21,7 +21,8 @@ def _save_favorites(items):
         json.dump(items, f, ensure_ascii=False, indent=2)
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "http://localhost:3000"}}, supports_credentials=True)
+CORS(app)
+
 
 #personal API key (we are using TMDb already existing API)
 API_KEY = '22ed80d327e416f838ff144080cae633'
@@ -32,78 +33,154 @@ TMDB_API_URL = 'https://api.themoviedb.org/3'
 #defines a function to search where each movie can be watched
 def get_watch_providers(movie_id):
     """Get streaming providers for a movie"""
-    url = f"{TMDB_API_URL}/movie/{movie_id}/watch/providers"
-    params = {"api_key": API_KEY}
-    response = requests.get(url, params=params)
-    data = response.json()
-    us_providers=data.get("results", {}).get("US", {})
-    return{
-        "flatrate": us_providers.get("flatrate", []),
-        "rent": us_providers.get("rent", []),
-        "buy": us_providers.get("buy", [])
-    }
+    try:
+        url = f"{TMDB_API_URL}/movie/{movie_id}/watch/providers"
+        params = {"api_key": API_KEY}
+        response = requests.get(url, params=params)
+        
+        # Add error handling for API response
+        if response.status_code != 200:
+            
+            return {"flatrate": [], "rent": [], "buy": []}
+            
+        data = response.json()
+        us_providers = data.get("results", {}).get("US", {})
+        
+        
+        
+        return {
+            "flatrate": us_providers.get("flatrate", []),
+            "rent": us_providers.get("rent", []),
+            "buy": us_providers.get("buy", [])
+        }
+    except Exception as e:
+        return {"flatrate": [], "rent": [], "buy": []}
 
 #defines a function to search for movie recs based on inputted mood
 #when building the actual app we make out own API to do HTTP requests into this
-def get_movie_recommendations(mood = "happy", runtime = 90, max_results=5):
-    #here we are mapping certain moods someone might imput to genre ids in the API
-    mood_to_genre_id = {"happy" : 12,
-                        "sad" : 35,
-                        "stressed" : 16,
-                        "dramatic": 18,
-                        "lonely": 10749,
-                        "curious": 878,
-                        "kid-friendly": 10751,
-                        "angry": 28}
-    #getting the genre_id based on mood (using lower to make it case_sensitive)
-    genre_id = mood_to_genre_id.get(mood.lower(), 12)
-    #by adding endpoint'/search/movie' we are sending a GET request to API to search for movies
-    url = f"{TMDB_API_URL}/discover/movie"
-    # dictionary that holds query parameters sent with every request:
-    #'api-key' = personal API key, 'with_genres' = id that represents each genre of movie
-    #'language' = sets the language of the results, 'include_adult' = False means not including adult content
-    #'sort_by" = sorts by popularity, 'vote_average.get' = gives only movies of higher than a 6 rating
-    #also found in API directory
-    params = {
-        "api_key": API_KEY,
-        "with_genres": genre_id,
-        "language": "en-US",
-        "sort_by": "popularity.desc",
-        "vote_average.gte" : 6,
-        "include_adult": False,
-        "with_runtime.lte" : runtime #only shows movies <= that runtime
-    }
+def get_movie_recommendations(mood="happy", runtime=90, max_results=5):
+    """Get movie recommendations based on mood and runtime"""
+    try:
+        mood_to_genres = {
+            "happy": [12, 35, 16, 10751],      # Adventure, Comedy, Animation, Family
+            "sad": [18, 10749],        # Drama, Romance
+            "stressed": [16, 35, 10751],   # Animation, Comedy, Family
+            "dramatic": [18, 36, 10752],   # Drama, History, War
+            "lonely": [10749, 35, 18],     # Romance, Comedy, Drama
+            "curious": [878, 99, 53],      # Sci-Fi, Documentary, Thriller
+            "kid-friendly": [16, 10751, 14], # Animation, Family, Fantasy
+            "angry": [28, 80, 53],         # Action, Crime, Thriller
+            "excited": [12, 28, 14],       # Adventure, Action, Fantasy
+            "romantic": [10749, 35, 18],   # Romance, Comedy, Drama
+            "scary": [27, 53, 9648],       # Horror, Thriller, Mystery
+            "funny": [35, 10751, 16],      # Comedy, Family, Animation
+        }
+        
+        genre_list = mood_to_genres.get(mood.lower(), [12, 35])
+        selected_genres = random.sample(genre_list, min(2, len(genre_list)))
+        genre_ids = ",".join(map(str, selected_genres))
+        # Random page number (1-5) to get different results each time
+        random_page = random.randint(1, 5)
+        # Vary sorting method randomly
+        sort_options = [
+            "popularity.desc",
+            "vote_average.desc", 
+            "release_date.desc",
+            "vote_count.desc"
+        ]
+        sort_by = random.choice(sort_options)
+        
+        url = f"{TMDB_API_URL}/discover/movie"
+        
+        params = {
+            "api_key": API_KEY,
+            "with_genres": genre_ids,
+            "language": "en-US",
+            "sort_by": "popularity.desc",
+            "vote_average.gte": 7.0,
+            "include_adult": False,
+            "with_runtime.lte": runtime,
+            "page": random_page
+        }
 
-    #send the actual request to TMDb's server using GET with url and params
-    response = requests.get(url, params=params)
+        # Add some randomness with additional filters
+        if random.choice([True, False]):
+            # Sometimes filter by release date to get newer or older movies
+            if random.choice([True, False]):
+                params["primary_release_date.gte"] = "2015-01-01"  # Newer movies
+            else:
+                params["primary_release_date.gte"] = "2000-01-01"  # Older movies
+        
 
-    #response from TMDb is in JSON and this conversts it into a python dictionary so we can work with it
-    data = response.json()
-    # ✅ Check if results are empty and fallback
-    if not data.get("results") and int(runtime) > 90:
-        print("No results found for that mood and runtime. Trying a shorter movie...")
-        params["with_runtime.lte"] = 90
         response = requests.get(url, params=params)
+        
+        if response.status_code != 200:
+            return []
+            
         data = response.json()
+        
+        # Fallback if no results
+        if not data.get("results") and int(runtime) > 90:
+            params["with_runtime.lte"] = 90
+            params["page"] = 1
+            response = requests.get(url, params=params)
+            data = response.json()
 
-    # ✅ Print results (whether original or fallback)
-    if not data["results"]:
-        print("Still no results found. Try another mood or runtime.")
-        return
+        if not data.get("results"):
+            return []
+        
+        results = data.get("results", [])
+        
+        # Filter out movies we might have seen before by checking if they're too popular
+        # This helps avoid the same blockbusters appearing every time
+        if len(results) > max_results * 2:
+            # Skip the most popular ones sometimes
+            start_index = random.randint(0, min(10, len(results) - max_results))
+            results = results[start_index:]
+        
+        # Randomly shuffle the results and take max_results
+        random.shuffle(results)
+        results = results[:max_results]
+        
+        # Build the response with watch providers
+        recommendations = []
+        
+        for i, movie in enumerate(results):
+            if movie.get("title") and movie.get("overview"):
+                movie_id = movie.get("id")
+                
+                watch_providers = get_watch_providers(movie_id) if movie_id else {"flatrate": [], "rent": [], "buy": []}
+                
+                movie_data = {
+                    "id": movie_id,
+                    "title": movie.get("title"),
+                    "overview": movie.get("overview"),
+                    "poster_path": movie.get("poster_path"),
+                    "release_date": movie.get("release_date"),
+                    "vote_average": movie.get("vote_average"),
+                    "watch_providers": watch_providers
+                }
+                
+                recommendations.append(movie_data)
+        
+        
+        return recommendations
+        
+    except Exception as e:
+        return []
     
-    #defined results as an array of max_results length
-    results = data.get("results", [])[:max_results]
-    #Returns cleaned-up list for user
-    return [
-    {
-        "id": movie.get("id"),
-        "title": movie.get("title"),
-        "overview": movie.get("overview"),
-        "poster_path": movie.get("poster_path"),
-        "watch_providers": get_watch_providers(movie.get("id"))
-    }
-    for movie in results if movie.get("title") and movie.get("overview")
-    ]
+# Handle preflight OPTIONS requests
+@app.route('/recommend', methods=['OPTIONS'])
+@app.route('/save_favorite', methods=['OPTIONS']) 
+@app.route('/favorites', methods=['OPTIONS'])
+@app.route('/clear_favorites', methods=['OPTIONS'])
+def handle_options():
+    response = jsonify({})
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    return response
+
 
 @app.route("/save_favorite", methods=["POST"])
 def save_favorite():
@@ -113,6 +190,9 @@ def save_favorite():
     overview = data.get("overview")
     mood = data.get("mood")
     poster_path = data.get("poster_path")
+    watch_providers = data.get("watch_providers", {"flatrate": [], "rent": [], "buy": []})
+    release_date = data.get("release_date")
+    vote_average = data.get("vote_average")
 
     if not title or not overview:
         return {"message": "Missing title or overview."}, 400
@@ -139,6 +219,9 @@ def save_favorite():
         "id": movie_id,
         "poster_path": poster_path,
         "date": datetime.now().strftime("%Y-%m-%d"),
+        "watch_providers": watch_providers,
+        "release_date": release_date,
+        "vote_average": vote_average,
     })
     _save_favorites(items)
     return {"message": "Favorite saved successfully!"}, 200
@@ -151,7 +234,6 @@ def get_movie_recommendations_api():
     runtime = data.get("runtime", 90)
     
     recommendations = get_movie_recommendations(mood, runtime)
-    print("Sending these recommendations:", recommendations)
     return jsonify({"movies": recommendations})
 
 #creates favorites file (seperate tab)
@@ -207,7 +289,7 @@ def cli_mode():
             print("Invalid option. Try again.")
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=5001, debug=True)
 
 
 
