@@ -1,28 +1,135 @@
 #requests library used to make HTTP requests to external APIs
 import requests
+import sqlite3
 from datetime import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os, json, random
+from functools import wraps
+import firebase_admin
+from firebase_admin import credentials, auth
 
-FAVORITES_FILE = "favorites.json"
+# Initialize Firebase Admin SDK
+# Download your service account key from Firebase Console → Project Settings → Service Accounts
+# Place it in your project directory and update the path below
+try:
+    # For production - use environment variables
+    if os.getenv('FIREBASE_PRIVATE_KEY'):
+        firebase_config = {
+            "type": "service_account",
+            "project_id": os.getenv('moodmatch-bb2c6'),
+            "private_key_id": os.getenv('cda7219556aeb9aa18923fe2442912416e34159a'),
+            "private_key": os.getenv('-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQCsOHymqxw+4IDk\nIiEeOhSvnDKkkn6w9BByC90R0S8VyQ9s6aWqMJKU94tZCfgT1tEM169CkkgtzSkL\nHJzJa3dLLly9yIf2IRbd165H9dHXRr//UJ7MfOWK4DiW1SXsZ7I/fXHlOEMp4zTs\nxFVDOQQkcboo7XRIxy4kIc9aj1L0/TrzTrNMCqDPF05JxVvfkpGc5wkKfhOpE9EE\nEJYuARK3vwvmkr+AU0ozvchV034ARbzGSYc1rAnRmJUlrTGDYJs66RskMLlhhIuv\nb6VwLW/kVeB0sy3QTlfGq2iDPyOZ40SBgOyyo0Ynav6haZSzgsnp8Eu1UjI6MTyS\n0O0Sbwa3AgMBAAECggEACyGrjOpKbRX9vsEl+touNBuYemKtpapg1b5Gj7xBmtrg\nEF4ZwyJYlyBY9WxbiIy9/mKChX8HA07bdEhpKeu0Tju06t9nSlVhMP2b2jLdWVjN\nWCdR3E3GWG+duMIWLW2Wa9wj3HkCfladOSCHkkzBI8nmCncuqPWW2ecFjAjvh74r\nR8rM+IytLwcsmQehbJrtUjC1Lo36+g5FTSxnmAHgeET5lbq6N2TDLwY8D+IxM5P1\nh0cjv1NruuhUUEfoDxfNjkrCJs/cdeNGHBWjo+m3TqufiwUEm15Uz/NY0SOUEifo\nOnlGvZ49MjEzx0R2mcZn+su60krn3a9ZUIROUbs9AQKBgQDU+2/A+imxgNsqz5pG\n7zZgNmbJdzimHjkYrQuiXofzRRYqXxFatL31nDo8tIG/tJoGp+NTWz/c/kKF3v21\n3KYR3q3h2yAfdjrAaOB73E/mXfQY7REYi5u9iEzWQvoZ1LV1tIP8vSCcBc/+4kIn\nFfWV0rBpw7cBdBwdy8QwBAuTVwKBgQDPAWokKDNDNNSyks/MZ0YUFSeRkaEyEqKt\nAwiINl1LUHzFzsyTzk3cs/QCMfvcZ+JG9zKHlk2ID8RWyyTyZ6S9sNIKiQDuqcsf\nrkef72bkJzO3LHbVqwRMggvZxqbeZPf/fOHKErORNMythw5qlE4BAvYODzxMibIR\nfXawmr5roQKBgATjQE1NcGeCbYUt/nxiQP00QmedNM+bIfRPBFVVlgkfLMMMK3nJ\nbBKW4z9BZTjhDCfa8nyXO3/21c/8rhXeWnFOiu8D+FjAfdisj3pINA01WsS3rAzE\nJ27SEfFY2CR/nSp2WhESxgzOlVdkGeCLwHcPvryuoSSHZZ3Jb1cqwJlBAoGAeI+R\nWteS64xkaFB698gaF24uqmhPopMZ7Xu7x2EqOsf4s1f67AaWcHjaH0EvN7HFJqGn\n6zHNm/Xa2tXbgdZ9KwFFg19BjL6VD7F4A5zxpuVyCDe8Sjsc+NYwwrggzZuumD0K\nX58+t84xessSyV3whEROO+gBrW3wqKEStE6boqECgYBZ5x75y7PnZ1ppikWIlPKe\nZBInyXILMgPQPq107hEP+cKWelaVXPw3uzBKpyGArHQfY0WMv7+1uWdI/hRNDpOc\nuI60/RLpvjHZVne+SySR+95qUdcevlCvZoNqf6cxeTKpwBYLTJ3ksgWtwGsSFB3v\nhoGHShICyNPh8HQZYMmH+g==\n-----END PRIVATE KEY-----\n').replace('\\n', '\n'),
+            "client_email": os.getenv('firebase-adminsdk-fbsvc@moodmatch-bb2c6.iam.gserviceaccount.com'),
+            "client_id": os.getenv('100511670367498861376'),
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+        }
+        cred = credentials.Certificate(firebase_config)
+        print("Using Firebase environment variables")
+    else:
+        # For local development
+        cred = credentials.Certificate("moodmatch-bb2c6-firebase-adminsdk-fbsvc-cda7219556.json")
+        print("Using Firebase JSON file for local development")
+    
+    firebase_admin.initialize_app(cred)
+    print("Firebase Admin initialized successfully")
+except Exception as e:
+    print(f"Firebase Admin initialization failed: {e}")
 
-def _load_favorites():
-    if not os.path.exists(FAVORITES_FILE):
-        return []
-    try:
-        with open(FAVORITES_FILE, "r") as f:
-            return json.load(f)
-    except Exception:
-        return []
+# Initialize SQLite database for user-specific favorites
+def init_db():
+    conn = sqlite3.connect('user_favorites.db')
+    cursor = conn.cursor()
+    
+    # Create user_favorites table with Firebase UID
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_favorites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            firebase_uid TEXT NOT NULL,
+            movie_id INTEGER,
+            title TEXT NOT NULL,
+            overview TEXT NOT NULL,
+            mood TEXT,
+            poster_path TEXT,
+            watch_providers TEXT,
+            release_date TEXT,
+            vote_average REAL,
+            date_saved TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(firebase_uid, movie_id)
+        )
+    ''')
+    
+    # Create users table to store user profile information
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            firebase_uid TEXT PRIMARY KEY,
+            email TEXT,
+            display_name TEXT,
+            photo_url TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_login TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    conn.commit()
+    conn.close()
 
-def _save_favorites(items):
-    with open(FAVORITES_FILE, "w") as f:
-        json.dump(items, f, ensure_ascii=False, indent=2)
+# Initialize database when app starts
+init_db()
 
 app = Flask(__name__)
 CORS(app)
 
+# Firebase authentication decorator
+def firebase_auth_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # Get the Authorization header
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return jsonify({"error": "Missing or invalid authorization header"}), 401
+        
+        # Extract the token
+        id_token = auth_header.split('Bearer ')[1]
+        
+        try:
+            # Verify the Firebase ID token
+            decoded_token = auth.verify_id_token(id_token)
+            # Add the user info to the request context
+            request.firebase_user = decoded_token
+            return f(*args, **kwargs)
+        except Exception as e:
+            print(f"Firebase token verification failed: {e}")
+            return jsonify({"error": "Invalid authentication token"}), 401
+    
+    return decorated_function
+
+# Optional decorator for endpoints that can work with or without auth
+def firebase_auth_optional(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # Get the Authorization header
+        auth_header = request.headers.get('Authorization')
+        
+        if auth_header and auth_header.startswith('Bearer '):
+            # Extract the token
+            id_token = auth_header.split('Bearer ')[1]
+            
+            try:
+                # Verify the Firebase ID token
+                decoded_token = auth.verify_id_token(id_token)
+                # Add the user info to the request context
+                request.firebase_user = decoded_token
+            except Exception as e:
+                print(f"Firebase token verification failed: {e}")
+                request.firebase_user = None
+        else:
+            request.firebase_user = None
+            
+        return f(*args, **kwargs)
+    
+    return decorated_function
 
 #personal API key (we are using TMDb already existing API)
 API_KEY = '22ed80d327e416f838ff144080cae633'
@@ -40,13 +147,10 @@ def get_watch_providers(movie_id):
         
         # Add error handling for API response
         if response.status_code != 200:
-            
             return {"flatrate": [], "rent": [], "buy": []}
             
         data = response.json()
         us_providers = data.get("results", {}).get("US", {})
-        
-        
         
         return {
             "flatrate": us_providers.get("flatrate", []),
@@ -57,7 +161,6 @@ def get_watch_providers(movie_id):
         return {"flatrate": [], "rent": [], "buy": []}
 
 #defines a function to search for movie recs based on inputted mood
-#when building the actual app we make out own API to do HTTP requests into this
 def get_movie_recommendations(mood="happy", runtime=90, max_results=5):
     """Get movie recommendations based on mood and runtime"""
     try:
@@ -96,8 +199,9 @@ def get_movie_recommendations(mood="happy", runtime=90, max_results=5):
             "api_key": API_KEY,
             "with_genres": genre_ids,
             "language": "en-US",
-            "sort_by": "popularity.desc",
+            "sort_by": sort_by,
             "vote_average.gte": 7.0,
+            "vote_count.gte": 100,
             "include_adult": False,
             "with_runtime.lte": runtime,
             "page": random_page
@@ -111,7 +215,6 @@ def get_movie_recommendations(mood="happy", runtime=90, max_results=5):
             else:
                 params["primary_release_date.gte"] = "2000-01-01"  # Older movies
         
-
         response = requests.get(url, params=params)
         
         if response.status_code != 200:
@@ -145,7 +248,7 @@ def get_movie_recommendations(mood="happy", runtime=90, max_results=5):
         # Build the response with watch providers
         recommendations = []
         
-        for i, movie in enumerate(results):
+        for movie in results:
             if movie.get("title") and movie.get("overview"):
                 movie_id = movie.get("id")
                 
@@ -163,17 +266,44 @@ def get_movie_recommendations(mood="happy", runtime=90, max_results=5):
                 
                 recommendations.append(movie_data)
         
-        
         return recommendations
         
     except Exception as e:
         return []
+
+# Store or update user information after login
+def store_user_info(firebase_user):
+    """Store user information in database after successful login"""
+    conn = sqlite3.connect('user_favorites.db')
+    cursor = conn.cursor()
     
+    try:
+        cursor.execute("""
+            INSERT OR REPLACE INTO users 
+            (firebase_uid, email, display_name, photo_url, last_login)
+            VALUES (?, ?, ?, ?, ?)
+        """, (
+            firebase_user['uid'],
+            firebase_user.get('email'),
+            firebase_user.get('name'),
+            firebase_user.get('picture'),
+            datetime.now().isoformat()
+        ))
+        conn.commit()
+    except Exception as e:
+        print(f"Error storing user info: {e}")
+    finally:
+        conn.close()
+
 # Handle preflight OPTIONS requests
 @app.route('/recommend', methods=['OPTIONS'])
 @app.route('/save_favorite', methods=['OPTIONS']) 
 @app.route('/favorites', methods=['OPTIONS'])
 @app.route('/clear_favorites', methods=['OPTIONS'])
+@app.route('/remove_favorite', methods=['OPTIONS'])
+@app.route('/user/profile', methods=['OPTIONS'])
+@app.route('/user/stats', methods=['OPTIONS'])
+@app.route('/auth/verify', methods=['OPTIONS'])
 def handle_options():
     response = jsonify({})
     response.headers.add('Access-Control-Allow-Origin', '*')
@@ -181,10 +311,131 @@ def handle_options():
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     return response
 
+# New Firebase Authentication Endpoints
+
+@app.route("/auth/verify", methods=["POST"])
+@firebase_auth_required
+def verify_token():
+    """Verify Firebase token and return user info"""
+    try:
+        firebase_user = request.firebase_user
+        
+        # Store user info in database
+        store_user_info(firebase_user)
+        
+        user_info = {
+            "uid": firebase_user['uid'],
+            "email": firebase_user.get('email'),
+            "name": firebase_user.get('name'),
+            "picture": firebase_user.get('picture'),
+            "email_verified": firebase_user.get('email_verified', False)
+        }
+        
+        return jsonify({"success": True, "user": user_info}), 200
+        
+    except Exception as e:
+        print(f"Error verifying token: {e}")
+        return jsonify({"success": False, "error": "Token verification failed"}), 401
+
+@app.route("/user/profile", methods=["GET"])
+@firebase_auth_required
+def get_user_profile():
+    """Get user profile information"""
+    firebase_uid = request.firebase_user['uid']
+    
+    conn = sqlite3.connect('user_favorites.db')
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("""
+            SELECT email, display_name, photo_url, created_at, last_login
+            FROM users 
+            WHERE firebase_uid = ?
+        """, (firebase_uid,))
+        
+        row = cursor.fetchone()
+        
+        if row:
+            profile = {
+                "uid": firebase_uid,
+                "email": row[0],
+                "display_name": row[1],
+                "photo_url": row[2],
+                "created_at": row[3],
+                "last_login": row[4]
+            }
+        else:
+            # If user not in database, create from Firebase token
+            firebase_user = request.firebase_user
+            profile = {
+                "uid": firebase_uid,
+                "email": firebase_user.get('email'),
+                "display_name": firebase_user.get('name'),
+                "photo_url": firebase_user.get('picture'),
+                "created_at": None,
+                "last_login": None
+            }
+            store_user_info(firebase_user)
+        
+        return jsonify(profile), 200
+        
+    except Exception as e:
+        print(f"Error fetching user profile: {e}")
+        return jsonify({"error": "Failed to fetch profile"}), 500
+    finally:
+        conn.close()
+
+@app.route("/user/stats", methods=["GET"])
+@firebase_auth_required
+def get_user_stats():
+    """Get user statistics (number of favorites, most common mood, etc.)"""
+    firebase_uid = request.firebase_user['uid']
+    
+    conn = sqlite3.connect('user_favorites.db')
+    cursor = conn.cursor()
+    
+    try:
+        # Get total favorites count
+        cursor.execute("SELECT COUNT(*) FROM user_favorites WHERE firebase_uid = ?", (firebase_uid,))
+        total_favorites = cursor.fetchone()[0]
+        
+        # Get most common mood
+        cursor.execute("""
+            SELECT mood, COUNT(*) as count 
+            FROM user_favorites 
+            WHERE firebase_uid = ? AND mood IS NOT NULL
+            GROUP BY mood 
+            ORDER BY count DESC 
+            LIMIT 1
+        """, (firebase_uid,))
+        
+        mood_result = cursor.fetchone()
+        most_common_mood = mood_result[0] if mood_result else None
+        
+        # Get favorite genres (you'd need to add genre tracking)
+        # For now, we'll return basic stats
+        
+        stats = {
+            "total_favorites": total_favorites,
+            "most_common_mood": most_common_mood,
+            "account_created": datetime.now().isoformat()  # You can get this from users table
+        }
+        
+        return jsonify(stats), 200
+        
+    except Exception as e:
+        print(f"Error fetching user stats: {e}")
+        return jsonify({"error": "Failed to fetch stats"}), 500
+    finally:
+        conn.close()
+
+# Updated existing endpoints
 
 @app.route("/save_favorite", methods=["POST"])
+@firebase_auth_required
 def save_favorite():
     data = request.get_json() or {}
+    firebase_uid = request.firebase_user['uid']
     movie_id = data.get("id")
     title = data.get("title")
     overview = data.get("overview")
@@ -195,66 +446,162 @@ def save_favorite():
     vote_average = data.get("vote_average")
 
     if not title or not overview:
-        return {"message": "Missing title or overview."}, 400
+        return jsonify({"message": "Missing title or overview."}), 400
 
-    items = _load_favorites()
-
-    #Duplicate Check
-    if movie_id is not None:
-        if any(str(it.get("id")) == str(movie_id) for it in items) :
-            return {"message": "Already in favorites."}, 409
+    conn = sqlite3.connect('user_favorites.db')
+    cursor = conn.cursor()
+    
+    try:
+        # Check if user already has this movie in favorites
+        cursor.execute(
+            "SELECT id FROM user_favorites WHERE firebase_uid = ? AND movie_id = ?", 
+            (firebase_uid, movie_id)
+        )
+        if cursor.fetchone():
+            return jsonify({"message": "Already in favorites."}), 409
         
-    else:
-        if any(
-            (it.get("title") or "").strip().lower() == title.strip().lower()
-            for it in items
-        ):
-            return {"message": "Already in favorites"}, 409
+        # Insert new favorite
+        cursor.execute("""
+            INSERT INTO user_favorites 
+            (firebase_uid, movie_id, title, overview, mood, poster_path, watch_providers, release_date, vote_average)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            firebase_uid, movie_id, title, overview, mood, poster_path, 
+            json.dumps(watch_providers), release_date, vote_average
+        ))
         
-
-    items.append({
-        "title": title,
-        "overview": overview,
-        "mood": mood,
-        "id": movie_id,
-        "poster_path": poster_path,
-        "date": datetime.now().strftime("%Y-%m-%d"),
-        "watch_providers": watch_providers,
-        "release_date": release_date,
-        "vote_average": vote_average,
-    })
-    _save_favorites(items)
-    return {"message": "Favorite saved successfully!"}, 200
-
+        conn.commit()
+        return jsonify({"message": "Favorite saved successfully!"}), 200
+        
+    except Exception as e:
+        print(f"Error saving favorite: {e}")
+        return jsonify({"message": "Failed to save favorite."}), 500
+    finally:
+        conn.close()
 
 @app.route("/recommend", methods=["POST"])
+@firebase_auth_optional  # Allow both authenticated and anonymous users
 def get_movie_recommendations_api():
-    data = request.get_json()
-    mood = data.get("mood", "").lower()
-    runtime = data.get("runtime", 90)
-    
-    recommendations = get_movie_recommendations(mood, runtime)
-    return jsonify({"movies": recommendations})
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No JSON data provided"}), 400
+            
+        mood = data.get("mood", "happy").lower()
+        runtime = data.get("runtime", 90)
+        
+        recommendations = get_movie_recommendations(mood, runtime)
+        
+        if not recommendations:
+            return jsonify({"movies": [], "message": "No movies found for this mood. Try a different mood or check your internet connection."}), 200
+        
+        # If user is authenticated, you could personalize recommendations here
+        if hasattr(request, 'firebase_user') and request.firebase_user:
+            # Add logic to personalize based on user's favorite history
+            pass
+        
+        return jsonify({"movies": recommendations}), 200
+        
+    except Exception as e:
+        return jsonify({"error": "Internal server error", "movies": []}), 500
 
-#creates favorites file (seperate tab)
 @app.route("/favorites", methods=["GET"])
+@firebase_auth_required
 def get_favorites():
-    return jsonify(_load_favorites()), 200
+    firebase_uid = request.firebase_user['uid']
     
-#opens favorite file in write mode and clears content
-@app.route("/clear_favorites", methods=["POST"])
-def clear_favorites():
-    _save_favorites([])
-    return jsonify({"message": "Favorites cleared!"}), 200
+    conn = sqlite3.connect('user_favorites.db')
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("""
+            SELECT movie_id, title, overview, mood, poster_path, watch_providers, 
+                   release_date, vote_average, date_saved
+            FROM user_favorites 
+            WHERE firebase_uid = ?
+            ORDER BY date_saved DESC
+        """, (firebase_uid,))
+        
+        rows = cursor.fetchall()
+        favorites = []
+        
+        for row in rows:
+            favorite = {
+                "id": row[0],
+                "title": row[1],
+                "overview": row[2],
+                "mood": row[3],
+                "poster_path": row[4],
+                "watch_providers": json.loads(row[5]) if row[5] else {"flatrate": [], "rent": [], "buy": []},
+                "release_date": row[6],
+                "vote_average": row[7],
+                "date_saved": row[8]
+            }
+            favorites.append(favorite)
+        
+        return jsonify(favorites), 200
+        
+    except Exception as e:
+        print(f"Error fetching favorites: {e}")
+        return jsonify([]), 500
+    finally:
+        conn.close()
 
+@app.route("/clear_favorites", methods=["POST"])
+@firebase_auth_required  # Fixed: Now requires authentication
+def clear_favorites():
+    firebase_uid = request.firebase_user['uid']
     
+    conn = sqlite3.connect('user_favorites.db')
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("DELETE FROM user_favorites WHERE firebase_uid = ?", (firebase_uid,))
+        conn.commit()
+        return jsonify({"message": "Favorites cleared!"}), 200
+    except Exception as e:
+        print(f"Error clearing favorites: {e}")
+        return jsonify({"message": "Failed to clear favorites."}), 500
+    finally:
+        conn.close()
+
+@app.route("/remove_favorite", methods=["DELETE"])
+@firebase_auth_required
+def remove_favorite():
+    """Remove a specific movie from favorites"""
+    firebase_uid = request.firebase_user['uid']
+    data = request.get_json() or {}
+    movie_id = data.get("movie_id")
+    
+    if not movie_id:
+        return jsonify({"message": "Movie ID is required"}), 400
+    
+    conn = sqlite3.connect('user_favorites.db')
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute(
+            "DELETE FROM user_favorites WHERE firebase_uid = ? AND movie_id = ?", 
+            (firebase_uid, movie_id)
+        )
+        
+        if cursor.rowcount == 0:
+            return jsonify({"message": "Movie not found in favorites"}), 404
+            
+        conn.commit()
+        return jsonify({"message": "Favorite removed successfully!"}), 200
+        
+    except Exception as e:
+        print(f"Error removing favorite: {e}")
+        return jsonify({"message": "Failed to remove favorite."}), 500
+    finally:
+        conn.close()
+
 #default error handling
 @app.errorhandler(Exception)
 def handle_error(e):
     print(f"Unhandled Exception: {e}")
     return jsonify({"error": str(e)}), 500
-
-
 
 def cli_mode():
     while True:
@@ -290,18 +637,3 @@ def cli_mode():
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=5001, debug=True)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
